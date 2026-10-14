@@ -28,7 +28,7 @@ module "aks_bootstrap" {
   argocd_server_service_type = "ClusterIP"
 
   # ─── GitOps Repo (App of Apps) ──────────────────────────
-  gitops_repo_url    = "https://github.com/your-org/gitops-repo.git"
+  gitops_repo_url    = "https://github.com/priya131293/gitops-demo.git"
   gitops_repo_branch = "main"
   gitops_repo_path   = "apps"
 
