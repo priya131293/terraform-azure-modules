@@ -1,0 +1,127 @@
+I am unable to connect the aks cluster like not able to run kubectl get nodes
+ command or any other because cluster is having Azure AD RBAC enabled so you need 
+ an Azure role assignment to access the cluster. Let's fix this. 
+
+ISSUES:
+
+$ kubectl get nodes
+Error from server (Forbidden): nodes is forbidden: User "p.kumari@slalom.com" cannot list 
+resource "nodes" in API group "" at the cluster scope: User does not have access to the 
+resource in Azure. Update role assignment to allow access.
+
+##Resolution:
+Why This Happens
+Your AKS cluster uses Azure AD RBAC (azure_rbac_enabled = true in the module). This means every user needs an Azure RBAC role on the AKS cluster to access it — even you who created it.
+
+✅ Fix: Assign Yourself the Cluster Admin Role
+Step 1: Get your Azure AD Object ID
+
+az ad signed-in-user show --query id --output tsv
+
+This will print something like: a1b2c3d4-e5f6-7890-abcd-ef1234567890
+
+Step 2: Assign the Cluster Admin role
+
+az role assignment create \
+  --assignee "$(az ad signed-in-user show --query id --output tsv)" \
+  --role "Azure Kubernetes Service RBAC Cluster Admin" \
+  --scope "/subscriptions/cad44ef1-313a-4da8-8d66-a58b6467472e/resourceGroups/rg-test-app/providers/Microsoft.ContainerService/managedClusters/aks-test-app"
+
+  Step 3: Wait 1-2 minutes for role to propagate, then test
+
+  Option B: Use Admin Credentials (Bypass Azure RBAC Temporarily)
+  
+  aks get-credentials --resource-group rg-test-app --name aks-test-app --admin
+
+  This uses the local admin account instead of Azure AD. Then test:
+
+  --admin bypasses RBAC — use only for testing, not production.
+
+  ******************************************************************************
+  Part 1: Connect GitHub Account to VS Code
+Step 1: Sign in to GitHub from VS Code
+Open VS Code
+Click the person icon (bottom-left corner) → Sign in to Sync Settings
+Or press Ctrl + Shift + P → type "GitHub: Sign In" → select it
+Browser opens → Authorize VS Code → click Authorize
+VS Code shows "You are signed in" ✅
+
+Step 2: Install Git (if not already installed)
+Check if Git is available:
+git --version
+git version 2.56.0.windows.1
+
+If it shows a version — you're good ✅
+
+If not, download from: https://git-scm.com/download/win
+
+Step 3: Configure Git Identity
+
+git config --global user.name "Priya Kumari"
+git config --global user.email "priyadevops1312@gmail.com"
+
+Create terraform-azure-modules Repo
+Go to https://github.com/new
+Fill in:
+Repository name: terraform-azure-modules
+Visibility: Public (or Private)
+✅ Check "Add a README file"
+Click Create repository
+
+Part 3: Push All Terraform Code to GitHub
+Step 1: Initialize Git in Your Terraform Directory
+
+cd ~/terraform
+git init
+
+Step 2: Create .gitignore to Exclude Sensitive Files
+cat > ~/terraform/.gitignore << 'EOF'
+# Terraform
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.tfvars
+*.tfvars.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+EOF
+
+
+Step 3: Add Remote (Your GitHub Repo)
+
+cd ~/terraform
+git remote add origin https://github.com/priya131293/terraform-azure-modules.git
+
+Step 4: Add All Files and Commit
+cd ~/terraform
+
+# Check what will be added
+git status
+
+# Add all files
+git add .
+
+# Commit
+git commit -m "Initial commit: Terraform modules for Azure (RG, VNet, AKS, AKS Bootstrap)"
