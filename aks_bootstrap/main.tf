@@ -1,19 +1,6 @@
 # ═══════════════════════════════════════════════════════════════
 # AKS Bootstrap Module — MINIMAL TERRAFORM FOOTPRINT
 # ═══════════════════════════════════════════════════════════════
-#
-# Terraform's ONLY responsibilities inside the cluster:
-#   1. Create the argocd namespace
-#   2. Install the Argo CD Helm chart
-#   3. Deploy a single "App of Apps" manifest
-#
-# Everything else (ingress, cert-manager, prometheus, secrets,
-# namespaces, RBAC, CRDs, etc.) is managed by Argo CD via GitOps.
-#
-# WHY: Argo CD handles drift detection continuously. Terraform
-# is not designed for in-cluster resource management. Having both
-# manage the same resources creates conflicts.
-# ═══════════════════════════════════════════════════════════════
 
 # ─── Data: Get AKS Credentials ───────────────────────────────
 
@@ -22,78 +9,108 @@ data "azurerm_kubernetes_cluster" "this" {
   resource_group_name = var.resource_group_name
 }
 
-# ─── Configure Providers ─────────────────────────────────────
+# ─── Configure Providers (using admin credentials) ───────────
 
 provider "helm" {
   kubernetes {
-    host                   = data.azurerm_kubernetes_cluster.this.kube_config[0].host
-    client_certificate     = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].client_certificate)
-    client_key             = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].client_key)
-    cluster_ca_certificate = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].cluster_ca_certificate)
+    host                   = data.azurerm_kubernetes_cluster.this.kube_admin_config[0].host
+    client_certificate     = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].client_certificate)
+    client_key             = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].client_key)
+    cluster_ca_certificate = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].cluster_ca_certificate)
   }
 }
 
 provider "kubectl" {
-  host                   = data.azurerm_kubernetes_cluster.this.kube_config[0].host
-  client_certificate     = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].client_certificate)
-  client_key             = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].client_key)
-  cluster_ca_certificate = base64decode(data.azurerm_kubernetes_cluster.this.kube_config[0].cluster_ca_certificate)
+  host                   = data.azurerm_kubernetes_cluster.this.kube_admin_config[0].host
+  client_certificate     = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].client_certificate)
+  client_key             = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].client_key)
+  cluster_ca_certificate = base64decode(data.azurerm_kubernetes_cluster.this.kube_admin_config[0].cluster_ca_certificate)
   load_config_file       = false
 }
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 1: Argo CD Namespace (only namespace Terraform creates)
+# STEP 1: Install Argo CD Helm Chart (Non-HA for single node)
 # ═══════════════════════════════════════════════════════════════
+/*resource "helm_release" "argocd" {
+  name             = "argocd"
+  repository       = "https://argoproj.github.io/argo-helm"
+  chart            = "argo-cd"
+  version          = var.argocd_chart_version
+  namespace        = var.argocd_namespace
+  create_namespace = true
+  timeout          = 900
+  wait             = true
 
-resource "kubectl_manifest" "argocd_namespace" {
-  yaml_body = <<-YAML
-    apiVersion: v1
-    kind: Namespace
-    metadata:
-      name: ${var.argocd_namespace}
-      labels:
-        app.kubernetes.io/managed-by: terraform
-        purpose: gitops-controller
-  YAML
-}
-
-# ═══════════════════════════════════════════════════════════════
-# STEP 2: Install Argo CD Helm Chart
-# ═══════════════════════════════════════════════════════════════
-
-resource "helm_release" "argocd" {
-  name       = "argocd"
-  repository = "https://argoproj.github.io/argo-helm"
-  chart      = "argo-cd"
-  version    = var.argocd_chart_version
-  namespace  = var.argocd_namespace
-  timeout    = 600
-  wait       = true
-
-  # ─── HA Mode ─────────────────────────────────────────────
+  # ─── Completely Disable HA (single node cluster) ─────────
   set {
     name  = "redis-ha.enabled"
-    value = var.argocd_ha_enabled ? "true" : "false"
+    value = "false"
+  }
+
+  set {
+    name  = "redis.enabled"
+    value = "true"
   }
 
   set {
     name  = "controller.replicas"
-    value = var.argocd_ha_enabled ? "2" : "1"
+    value = "1"
   }
 
   set {
     name  = "server.replicas"
-    value = var.argocd_ha_enabled ? "2" : "1"
+    value = "1"
   }
 
   set {
     name  = "repoServer.replicas"
-    value = var.argocd_ha_enabled ? "2" : "1"
+    value = "1"
   }
 
   set {
     name  = "applicationSet.replicas"
-    value = var.argocd_ha_enabled ? "2" : "1"
+    value = "1"
+  }
+
+  # ─── Reduce Resource Requests (for small nodes) ─────────
+  set {
+    name  = "controller.resources.requests.cpu"
+    value = "100m"
+  }
+
+  set {
+    name  = "controller.resources.requests.memory"
+    value = "128Mi"
+  }
+
+  set {
+    name  = "server.resources.requests.cpu"
+    value = "50m"
+  }
+
+  set {
+    name  = "server.resources.requests.memory"
+    value = "64Mi"
+  }
+
+  set {
+    name  = "repoServer.resources.requests.cpu"
+    value = "50m"
+  }
+
+  set {
+    name  = "repoServer.resources.requests.memory"
+    value = "64Mi"
+  }
+
+  set {
+    name  = "redis.resources.requests.cpu"
+    value = "50m"
+  }
+
+  set {
+    name  = "redis.resources.requests.memory"
+    value = "64Mi"
   }
 
   # ─── Server Configuration ───────────────────────────────
@@ -102,14 +119,6 @@ resource "helm_release" "argocd" {
     value = var.argocd_server_service_type
   }
 
-  # Allow Argo CD to manage itself (self-managed pattern)
-  set {
-    name  = "server.config.application\\.resourceTrackingMethod"
-    value = "annotation"
-  }
-
-  # ─── Disable Argo CD managing its own CRDs via Helm ─────
-  # Let Argo CD manage its own upgrades after initial install
   set {
     name  = "crds.install"
     value = "true"
@@ -119,36 +128,11 @@ resource "helm_release" "argocd" {
     name  = "crds.keep"
     value = "true"
   }
-
-  depends_on = [kubectl_manifest.argocd_namespace]
 }
+*/
 
 # ═══════════════════════════════════════════════════════════════
-# STEP 3: App of Apps — THE SINGLE ENTRY POINT FOR GITOPS
-# ═══════════════════════════════════════════════════════════════
-#
-# This is the ONLY Argo CD Application Terraform creates.
-# This "App of Apps" points to a Git repo that contains
-# definitions for ALL other applications. Argo CD then
-# manages everything from here.
-#
-# Git Repo Structure (managed by Argo CD, NOT Terraform):
-#   gitops-repo/
-#   ├── apps/
-#   │   ├── ingress-nginx.yaml
-#   │   ├── cert-manager.yaml
-#   │   ├── prometheus-stack.yaml
-#   │   ├── external-secrets.yaml
-#   │   └── namespaces.yaml
-#   ├── base/
-#   │   ├── ingress-nginx/
-#   │   ├── cert-manager/
-#   │   ├── monitoring/
-#   │   └── external-secrets/
-#   └── overlays/
-#       ├── dev/
-#       ├── test/
-#       └── prod/
+# STEP 2: App of Apps — SINGLE ENTRY POINT FOR GITOPS
 # ═══════════════════════════════════════════════════════════════
 
 resource "kubectl_manifest" "app_of_apps" {
@@ -189,5 +173,5 @@ resource "kubectl_manifest" "app_of_apps" {
             maxDuration: 3m
   YAML
 
-  depends_on = [helm_release.argocd]
+  #depends_on = [helm_release.argocd]
 }
